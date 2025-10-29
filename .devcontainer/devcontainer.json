@@ -2,15 +2,25 @@
   "name": "gpt-code-ui (node20)",
   "build": {
     "dockerfile": "Dockerfile",
-    "context": "."
+    "context": ".."
   },
-  "settings": {
-    "terminal.integrated.shell.linux": "/bin/bash"
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "esbenp.prettier-vscode",
+        "dbaeumer.vscode-eslint",
+        "ms-vscode.vscode-typescript-next",
+        "ms-azuretools.vscode-docker"
+      ]
+    }
   },
-  "extensions": [
-    "dbaeumer.vscode-eslint",
-    "esbenp.prettier-vscode"
-  ],
-  "postCreateCommand": "node -v || true && npm -v || true",
-  "remoteUser": "vscode"
+  "forwardPorts": [3000, 3001],
+  "workspaceFolder": "/workspaces/gpt-code-ui",
+  "updateContentCommand": "bash -lc 'echo container built'",
+  "containerEnv": {
+    "NVM_DIR": "/home/vscode/.nvm"
+  },
+  "remoteUser": "vscode",
+  "postCreateCommand": "bash -lc 'cd frontend && npm ci || true'",
+  "shutdownAction": "stopContainer"
 }
