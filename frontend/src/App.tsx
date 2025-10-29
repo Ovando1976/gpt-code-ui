@@ -1,253 +1,197 @@
 import "./App.css";
+import { useAuth } from "./hooks/useAuth"; // or import hook
+import { usePresence } from "./hooks/usePresence";
+import AuthButton from "./components/AuthButton";
 import Input from "./components/Input";
 import Sidebar from "./components/Sidebar";
-import Chat, { WaitingStates } from "./components/Chat";
-import React, { useState } from "react";
+import Chat from "./components/Chat";
+import { WaitingStates } from "./types";
+import { useState, useRef, useEffect } from "react";
 import Config from "./config";
 import { useLocalStorage } from "usehooks-ts";
 
-export type MessageDict = {
+
+
+export interface MessageDict {
+  id: string;
   text: string;
-  role: string;
-  type: string;
-};
+  role: "user" | "system";
+  type: "message" | "code" | string; // allow images like "image/png"
+  pinned?: boolean; // track pin status
+  timestamp: number;
+}
 
 function App() {
-  const COMMANDS = ["reset"];
+  const { user } = useAuth();
+  useEffect(() => {
+    if (user) usePresence();
+  }, [user]);
+
+  // create or select chatId after auth...
+  const chatId = "default-chat"; // create a doc /chats/default-chat manually or auto create
+
+  const COMMANDS = ["reset", "clear"];
   const MODELS = [
-    {
-      displayName: "GPT-3.5",
-      name: "gpt-3.5-turbo",
-    },
-    {
-      displayName: "GPT-4",
-      name: "gpt-4",
-    },
+    { displayName: "GPT-3.5", name: "gpt-3.5-turbo" },
+    { displayName: "GPT-4", name: "gpt-4" },
   ];
 
-  let [selectedModel, setSelectedModel] = useLocalStorage<string>(
-    "model",
-    MODELS[0].name
-  );
 
-  let [openAIKey, setOpenAIKey] = useLocalStorage<string>("OpenAIKey", "");
+  const handleRetryMessage = (text: string) => {
+  if (!text.trim()) return;
 
-  let [messages, setMessages] = useState<Array<MessageDict>>(
-    Array.from([
-      {
-        text: "Hello! I'm a GPT Code assistant. Ask me to do something for you! Pro tip: you can upload a file and I'll be able to use it.",
-        role: "system",
-        type: "message",
-      },
-      {
-        text: "If I get stuck just type 'reset' and I'll restart the kernel.",
-        role: "system",
-        type: "message",
-      },
-    ])
-  );
-  let [waitingForSystem, setWaitingForSystem] = useState<WaitingStates>(
-    WaitingStates.Idle
-  );
-  const chatScrollRef = React.useRef<HTMLDivElement>(null);
+  // Add user-like message indicating retry
+  addMessage({ 
+    id: crypto.randomUUID(), 
+    text: `Retrying: ${text}`, 
+    role: "system", 
+    type: "message",
+    timestamp: Date.now() 
+  });
 
-  const submitCode = async (code: string) => {
-    fetch(`${Config.API_ADDRESS}/api`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ command: code }),
+  setWaitingForSystem(WaitingStates.GeneratingCode);
+
+  wsRef.current?.send(
+    JSON.stringify({
+      action: "run_code",
+      code: text,
+      model: selectedModel,
+      openAIKey,
     })
-      .then(() => {})
-      .catch((error) => console.error("Error:", error));
-  };
+  );
+};
 
-  const addMessage = (message: MessageDict) => {
-    setMessages((state: any) => {
-      return [...state, message];
-    });
-  };
+  const [selectedModel, setSelectedModel] = useLocalStorage<string>("model", MODELS[0].name);
+  const [openAIKey, setOpenAIKey] = useLocalStorage<string>("OpenAIKey", "");
+  const [messages, setMessages] = useState<MessageDict[]>([
+    { id: crypto.randomUUID(), text: "Hello! Ask me to do something.", role: "system", type: "message", timestamp: Date.now() },
+    { id: crypto.randomUUID(), text: "Type 'reset' to restart the kernel.", role: "system", type: "message", timestamp: Date.now() },
+  ]);
+  const [waitingForSystem, setWaitingForSystem] = useState<WaitingStates>(WaitingStates.Idle);
 
+  const chatScrollRef = useRef<HTMLDivElement>(null);
+  const wsRef = useRef<WebSocket | null>(null);
+
+  /** Initialize WebSocket */
+  useEffect(() => {
+    wsRef.current = new WebSocket(`${Config.WS_ADDRESS}/ws`);
+
+    wsRef.current.onopen = () => console.log("WebSocket connected");
+
+    wsRef.current.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+
+      // Streaming code output
+      if (data.type === "stream") {
+        setMessages((prev) => {
+          const lastMsg = prev[prev.length - 1];
+          if (lastMsg && lastMsg.role === "system" && lastMsg.type === "code") {
+            const updated = [...prev];
+            updated[updated.length - 1].text += data.output;
+            return updated;
+          } else {
+            return [...prev, { 
+              id: crypto.randomUUID(), 
+              text: data.output, 
+              type: "code", 
+              role: "system", 
+              timestamp: Date.now() 
+            }];
+          }
+        });
+      }
+
+      // Finalize message
+      if (data.type === "final") setWaitingForSystem(WaitingStates.Idle);
+    };
+
+    wsRef.current.onclose = () => console.log("WebSocket disconnected");
+    wsRef.current.onerror = (err) => console.error("WebSocket error:", err);
+
+    return () => wsRef.current?.close();
+  }, []);
+
+  /** Add a message to state */
+  const addMessage = (msg: MessageDict) => setMessages((prev) => [...prev, msg]);
+
+  /** Handle special commands */
   const handleCommand = (command: string) => {
-    if (command == "reset") {
-      addMessage({
-        text: "Restarting the kernel.",
-        type: "message",
-        role: "system",
-      });
+    if (command === "reset") {
+      addMessage({ id: crypto.randomUUID(), text: "Restarting kernel...", role: "system", type: "message", timestamp: Date.now() });
+      wsRef.current?.send(JSON.stringify({ action: "reset" }));
+    }
+    if (command === "clear") setMessages([]);
+  };
 
-      fetch(`${Config.API_ADDRESS}/restart`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({}),
+  /** Send a user message / run code */
+  const sendMessage = (text: string) => {
+    if (!text.trim()) return;
+    if (COMMANDS.includes(text)) return handleCommand(text);
+
+    addMessage({ id: crypto.randomUUID(), text, role: "user", type: "message", timestamp: Date.now() });
+    setWaitingForSystem(WaitingStates.GeneratingCode);
+
+    wsRef.current?.send(
+      JSON.stringify({
+        action: "run_code",
+        code: text,
+        model: selectedModel,
+        openAIKey,
       })
-        .then(() => {})
-        .catch((error) => console.error("Error:", error));
-    }
+    );
   };
 
-  const sendMessage = async (userInput: string) => {
-    try {
-      if (COMMANDS.includes(userInput)) {
-        handleCommand(userInput);
-        return;
-      }
-
-      if (userInput.length == 0) {
-        return;
-      }
-
-      addMessage({ text: userInput, type: "message", role: "user" });
-      setWaitingForSystem(WaitingStates.GeneratingCode);
-
-      const response = await fetch(`${Config.WEB_ADDRESS}/generate`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          prompt: userInput,
-          model: selectedModel,
-          openAIKey: openAIKey,
-        }),
-      });
-
-      
-
-      const data = await response.json();
-      const code = data.code;
-
-      addMessage({ text: code, type: "code", role: "system" });
-
-      if (response.status != 200) {
-        setWaitingForSystem(WaitingStates.Idle);
-        return;
-      }
-      
-      submitCode(code);
-      setWaitingForSystem(WaitingStates.RunningCode);
-    } catch (error) {
-      console.error(
-        "There has been a problem with your fetch operation:",
-        error
-      );
-    }
+  /** File upload completion */
+  const completeUpload = (filename: string) => {
+    addMessage({ id: crypto.randomUUID(), text: `File ${filename} uploaded successfully.`, role: "system", type: "message", timestamp: Date.now() });
   };
 
-  async function getApiData() {
-    if(document.hidden){
-      return;
-    }
-    
-    let response = await fetch(`${Config.API_ADDRESS}/api`);
-    let data = await response.json();
-    data.results.forEach(function (result: {value: string, type: string}) {
-      if (result.value.trim().length == 0) {
-        return;
-      }
 
-      addMessage({ text: result.value, type: result.type, role: "system" });
-      setWaitingForSystem(WaitingStates.Idle);
-    });
-  }
+  /** Auto-scroll chat but keep pinned messages visible */
+useEffect(() => {
+  if (!chatScrollRef.current) return;
 
-  function completeUpload(filename: string) {
-    addMessage({
-      text: `File ${filename} was uploaded successfully.`,
-      type: "message",
-      role: "system",
-    });
+  const container = chatScrollRef.current;
 
-    setWaitingForSystem(WaitingStates.Idle);
+  // Calculate the total height of pinned messages
+  const pinnedElems = container.querySelectorAll(".message.pinned");
+  let pinnedHeight = 0;
+  pinnedElems.forEach((el) => {
+    pinnedHeight += (el as HTMLElement).offsetHeight + 6; // 6px gap
+  });
 
-    // Inform prompt server
-    fetch(`${Config.WEB_ADDRESS}/inject-context`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        prompt: `File ${filename} was uploaded successfully.`,
-      }),
-    })
-      .then(() => {})
-      .catch((error) => console.error("Error:", error));
-  }
+  // Scroll to bottom minus pinned height
+  container.scrollTo({
+    top: container.scrollHeight - container.clientHeight + pinnedHeight,
+    behavior: "smooth",
+  });
+}, [messages]);
 
-  function startUpload(_: string) {
-    setWaitingForSystem(WaitingStates.UploadingFile);
-  }
-
-  React.useEffect(() => {
-    const interval = setInterval(getApiData, 1000);
-    return () => clearInterval(interval);
-  }, [getApiData]);
-
-  React.useEffect(() => {
-    // Scroll down container by setting scrollTop to the height of the container
-    chatScrollRef.current!.scrollTop = chatScrollRef.current!.scrollHeight;
-  }, [chatScrollRef, messages]);
-
-
-  // Capture <a> clicks for download links
-  React.useEffect(() => {
-    const clickHandler = (event: any) => {
-      let element = event.target;
-      
-      // If an <a> element was found, prevent default action and do something else
-      if (element != null && element.tagName === 'A') {
-        // Check if href starts with /download
-        
-        if (element.getAttribute("href").startsWith(`/download`)) {
-          event.preventDefault();
-
-          // Make request to ${Config.WEB_ADDRESS}/download instead
-          // make it by opening a new tab
-          window.open(`${Config.WEB_ADDRESS}${element.getAttribute("href")}`);
-        }        
-      }
-    };
-
-    // Add the click event listener to the document
-    document.addEventListener('click', clickHandler);
-
-    // Cleanup function to remove the event listener when the component unmounts
-    return () => {
-      document.removeEventListener('click', clickHandler);
-    };
-  }, []); 
-
+  
   return (
-    <>
-      <div className="app">
-        <Sidebar
-          models={MODELS}
-          selectedModel={selectedModel}
-          onSelectModel={(val: string) => {
-            setSelectedModel(val);
-          }}
-          openAIKey={openAIKey}
-          setOpenAIKey={(val: string) => {
-            setOpenAIKey(val);
-          }}
+    <div className="app">
+      <Sidebar
+        models={MODELS}
+        selectedModel={selectedModel}
+        onSelectModel={setSelectedModel}
+        openAIKey={openAIKey}
+        setOpenAIKey={setOpenAIKey}
+      />
+      <div className="main">
+        <Chat
+  chatScrollRef={chatScrollRef}
+  waitingForSystem={waitingForSystem}
+  messages={messages}
+  onRetryMessage={handleRetryMessage}
+/>
+<Input
+          onSendMessage={sendMessage}
+          onStartUpload={() => setWaitingForSystem(WaitingStates.UploadingFile)}
+          onCompletedUpload={completeUpload}
+          isTyping={waitingForSystem === WaitingStates.GeneratingCode}
         />
-        <div className="main">
-          <Chat
-            chatScrollRef={chatScrollRef}
-            waitingForSystem={waitingForSystem}
-            messages={messages}
-          />
-          <Input
-            onSendMessage={sendMessage}
-            onCompletedUpload={completeUpload}
-            onStartUpload={startUpload}
-          />
-        </div>
       </div>
-    </>
+    </div>
   );
 }
 

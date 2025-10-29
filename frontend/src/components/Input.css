@@ -1,56 +1,82 @@
-textarea {
-    padding: 0.9rem 1rem;
-    border: none;
-    font-size: 1rem;
-    border-radius: .375rem;
-    flex: 1;
-    font: inherit;
-    font-size: 1rem;
-    line-height: 1.5rem;
-    resize: none;
-    max-height: 300px;
-}
-
-textarea:focus {
-    outline: none
-}
-
-form.file-upload button, button.send {
-    border: 0;
-    background: #eee;
-    margin: 0.5rem;
-    border-radius: 0.5rem;
-    padding: 0.3rem 0.5rem;
-    cursor: pointer;
-    height: fit-content;
-}
-
-form.file-upload button {
-    margin-right: 0;
-}
-
-form.file-upload svg, button.send svg {
-    margin-top: 3px;
-    width: 20px;
-    height: auto;
-}
-
 .input-parent {
-  padding: 1rem;
+  position: relative;
+  padding: 0.5rem;
+  transition: box-shadow 0.3s ease-in-out;
+  border-radius: 12px;
 }
 
-svg {
-    color: #000;
+/* PULSING GLOW WHILE TYPING */
+.input-parent.typing-glow {
+  box-shadow: 0 0 12px 3px #00ffc3;
+  animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+  0% { box-shadow: 0 0 5px 1px #00ffc3; }
+  50% { box-shadow: 0 0 15px 5px #00ffc3; }
+  100% { box-shadow: 0 0 5px 1px #00ffc3; }
 }
 
 .input-holder {
-    display: flex;
-    justify-items: center;
-    box-shadow: 0 0 10px rgba(0,0,0,.1);
-    border: rgba(0,0,0,.1) 1px solid;
-    border-radius: .375rem;
+  display: flex;
+  align-items: center;
+  background-color: #1f1f1f;
+  padding: 0.5rem;
+  border-radius: 12px;
+  gap: 0.5rem;
 }
 
 .input-holder.focused {
-    border: rgba(0,0,0,.3) 1px solid;
+  border: 1px solid #00ffc3;
+}
+
+.file-upload button,
+.send {
+  background: none;
+  border: none;
+  color: #00ffc3;
+  cursor: pointer;
+  transition: transform 0.1s;
+}
+
+.file-upload button:hover,
+.send:hover {
+  transform: scale(1.1);
+}
+
+.textarea {
+  flex: 1;
+  background: transparent;
+  color: white;
+  resize: none;
+  border: none;
+  outline: none;
+  font-size: 1rem;
+}
+
+.typing-indicator {
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+}
+
+.typing-indicator span {
+  width: 6px;
+  height: 6px;
+  background: #00ffc3;
+  border-radius: 50%;
+  display: inline-block;
+  animation: bounce 1s infinite;
+}
+
+.typing-indicator span:nth-child(2) {
+  animation-delay: 0.2s;
+}
+.typing-indicator span:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes bounce {
+  0%, 80%, 100% { transform: scale(0); opacity: 0.3; }
+  40% { transform: scale(1); opacity: 1; }
 }
